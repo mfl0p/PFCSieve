@@ -38,7 +38,7 @@ void help()
 	printf("-p #	Starting prime factor p\n");
 	printf("-P #	End prime factor P\n");
 	printf("		P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive\n");
-	printf("		Note for primorial and factorial -p must be >= -n because there are no factors when p <= n\n");
+	printf("		Note for primorial and factorial there are no factors when p <= n\n");
 	printf("		Note N!+-1, N#+-1, and N!/#+-1 are not divisible by 2.\n");
 	printf("-v #	Optional, specify the number of CPU threads used to verify factors.  Default is 2, max is 128.\n");
 	printf("-s 	Perform self test to verify proper operation of the program with the current GPU.\n");

@@ -640,12 +640,6 @@ void setupSearch(workStatus & st, searchData & sd){
 		exit(EXIT_FAILURE);
 	}
 
-	if (st.pmin < st.nmin && (st.factorial || st.primorial) ){
-		printf("for factorial and primorial pmin must be >= nmin, there are no factors when p <= nmin\nuse -h for help\n");
-		fprintf(stderr, "for factorial and primorial pmin must be >= nmin, there are no factors when p <= nmin\n");
-		exit(EXIT_FAILURE);
-	}
-
 	// increase result buffer at low P range
 	// it's still possible to overflow this with a fast GPU and large search range
 	if(st.pmin < 0xFFFFFFFF){

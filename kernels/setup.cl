@@ -250,7 +250,7 @@ __kernel void combined_setup(	__global ulong8 * g_prime,
 	}
 
 	// remaining iterations of factorial power table, starting at prime = 3
-	uint loop_end = end > f_end ? f_end : end;
+	uint loop_end = (end > f_end) ? f_end : end;
 	for(uint k=i; k<loop_end; ++k){
 		ulong sm_prime = g_smallprimeprod[k];
 		// .s0=exp, .s1=curBit
@@ -274,7 +274,7 @@ __kernel void combined_setup(	__global ulong8 * g_prime,
 		prime.s6 = m_mul(prime.s6, primepow, prime.s0, prime.s1);
 	}
 
-	loop_end = end > c_end ? c_end : end;
+	loop_end = (end > c_end) ? c_end : end;
 	for(uint k=i; k<loop_end; ++k){
 		ulong prod = g_smallcompprod[k];
 		ulong montcompprod = m_mul(prod, prime.s2, prime.s0, prime.s1);
