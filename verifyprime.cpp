@@ -16,6 +16,9 @@
 #include <cinttypes>
 #include <stdio.h>
 
+#define FACTORIAL 0
+#define PRIMORIAL 1
+#define COMPOSITORIAL 2
 
 uint64_t invert(uint64_t p)
 {
@@ -143,11 +146,11 @@ bool isPrime(uint64_t p)
 
 
 // verifies the factor on CPU using slow algorithm
-bool verify(uint64_t p, uint32_t n, int32_t c, bool factorial, bool primorial, bool compositorial, uint32_t * verifylist, size_t verifylistsize){
+bool verify(uint64_t p, uint32_t n, int32_t c, int32_t type, uint32_t * verifylist, size_t verifylistsize){
 
 	uint64_t result=0;
 
-	if(factorial){
+	if(type == FACTORIAL){
 		// precompute 34! that fits in 128 bits
 		const unsigned __int128 f34 = ((unsigned __int128)0xde1bc4d19efcac82 << 64) | 0x445da75b00000000;
 
@@ -164,7 +167,7 @@ bool verify(uint64_t p, uint32_t n, int32_t c, bool factorial, bool primorial, b
 			}
 		}
 	}
-	else if(primorial){
+	else if(type == PRIMORIAL){
 		// precompute 101# that fits in 128 bits
 		const unsigned __int128 p101 = ((unsigned __int128)0xaf2fa8f8a2d02a93 << 64) | 0xae69c9f8987d5efe;
 
@@ -183,7 +186,7 @@ bool verify(uint64_t p, uint32_t n, int32_t c, bool factorial, bool primorial, b
 			}
 		}
 	}
-	else if(compositorial){
+	else if(type == COMPOSITORIAL){
 		// precompute 44!/# that fits in 128 bits
 		const unsigned __int128 c44 = ((unsigned __int128)0x98dcc10f185c0e67 << 64) | 0x3c93ff0000000000;
 

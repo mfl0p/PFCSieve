@@ -18,7 +18,7 @@ ulong invert(ulong p){
 	return p_inv;
 }
 
-__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void addsmallprimes(ulong low, ulong high, __global ulong8 *g_prime, __global uint *g_primecount){
+__kernel void addsmallprimes(ulong low, ulong high, __global ulong8 *g_prime, __global uint *g_primecount){
 
 	const uint gid = get_global_id(0);
 

@@ -31,6 +31,7 @@ void help()
 	printf("-!	Use factorial mode\n");
 	printf("-#	Use primorial mode\n");
 	printf("-c	Use compositorial mode\n");
+	printf("		Note: -! -c can be used together to find factors of both at the same time.\n");
 	printf("-n #	Start primorial n#+-1, factorial n!+-1, or compositorial n!/#+-1\n");
 	printf("-N #	End primorial N#+-1, factorial N!+-1, or compositorial N!/#+-1\n");
 	printf("		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive\n");

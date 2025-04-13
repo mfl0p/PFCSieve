@@ -31,17 +31,7 @@
 #include "iterate.h"
 #include "verifyslow.h"
 #include "verify.h"
-#include "verifyreduce.h"
 #include "verifyresult.h"
-#include "primcheck.h"
-#include "primsetup.h"
-#include "primiterate.h"
-#include "primverifyslow.h"
-#include "primverify.h"
-#include "compsetup.h"
-#include "compiterate.h"
-#include "compverifyslow.h"
-#include "compverify.h"
 
 #include "primesieve.h"
 #include "putil.h"
@@ -51,8 +41,6 @@
 #define RESULTS_FILENAME "factors.txt"
 #define STATE_FILENAME_A "stateA.ckp"
 #define STATE_FILENAME_B "stateB.ckp"
-
-
 
 void handle_trickle_up(workStatus & st){
 	if(boinc_is_standalone()) return;
@@ -91,7 +79,6 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseMemObject(pd.d_sum);
 	sclReleaseMemObject(pd.d_primes);
 	sclReleaseMemObject(pd.d_primecount);
-	sclReleaseMemObject(pd.d_products);
 	sclReleaseClSoft(pd.check);
 	sclReleaseClSoft(pd.clearn);
 	sclReleaseClSoft(pd.clearresult);
@@ -99,14 +86,18 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
         sclReleaseClSoft(pd.setup);
         sclReleaseClSoft(pd.getsegprimes);
         sclReleaseClSoft(pd.addsmallprimes);
-	sclReleaseClSoft(pd.verifyslow);
-	sclReleaseClSoft(pd.verify);
 	sclReleaseClSoft(pd.verifyreduce);
 	sclReleaseClSoft(pd.verifyresult);
 	if(st.factorial){
+		sclReleaseMemObject(pd.d_primeproducts);
 		sclReleaseMemObject(pd.d_powers);
 	}
-	else{
+	if(st.primorial){
+		sclReleaseMemObject(pd.d_primeproducts);
+		sclReleaseMemObject(pd.d_smallprimes);
+	}
+	if(st.compositorial){
+		sclReleaseMemObject(pd.d_compproducts);
 		sclReleaseMemObject(pd.d_smallprimes);
 	}
 }
@@ -520,16 +511,17 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			uint64_t fp = h_factor[i].p;
 			uint32_t fn = (h_factor[i].nc < 0) ? -h_factor[i].nc : h_factor[i].nc; 
 			int32_t fc = (h_factor[i].nc < 0) ? -1 : 1;
-			if( !verify( fp, fn, fc, st.factorial, st.primorial, st.compositorial, verifylist, verifylistsize ) ){
-				if(st.factorial){
+			int32_t type = h_factor[i].type;
+			if( !verify( fp, fn, fc, type, verifylist, verifylistsize ) ){
+				if(type == FACTORIAL){
 					fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u!%+d\n", fp, fn, fc);
 					printf("\nCPU factor verification failed!  %" PRIu64 " is not a factor of %u!%+d\n", fp, fn, fc);
 				}
-				else if(st.primorial){
+				else if(type == PRIMORIAL){
 					fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u#%+d\n", fp, fn, fc);
 					printf("\nCPU factor verification failed!  %" PRIu64 " is not a factor of %u#%+d\n", fp, fn, fc);
 				}
-				else if(st.compositorial){
+				else if(type == COMPOSITORIAL){
 					fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u!/#%+d\n", fp, fn, fc);
 					printf("\nCPU factor verification failed!  %" PRIu64 " is not a factor of %u!/#%+d\n", fp, fn, fc);
 				}
@@ -565,22 +557,23 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			uint64_t fp = h_factor[i].p;
 			uint32_t fn = (h_factor[i].nc < 0) ? -h_factor[i].nc : h_factor[i].nc; 
 			int32_t fc = (h_factor[i].nc < 0) ? -1 : 1;
+			int32_t type = h_factor[i].type;
 			if( fp == lastgoodp || isPrime(fp) ){	// gpu generates 2-PRPs, we only want prime factors
 				lastgoodp = fp;
 				++st.factorcount;
-				if(st.factorial){
+				if(type == FACTORIAL){
 					if( fprintf( resfile, "%" PRIu64 " | %u!%+d\n",fp,fn,fc) < 0 ){
 						fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 						exit(EXIT_FAILURE);
 					}
 				}
-				else if(st.primorial){
+				else if(type == PRIMORIAL){
 					if( fprintf( resfile, "%" PRIu64 " | %u#%+d\n",fp,fn,fc) < 0 ){
 						fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 						exit(EXIT_FAILURE);
 					}
 				}
-				else if(st.compositorial){
+				else if(type == COMPOSITORIAL){
 					if( fprintf( resfile, "%" PRIu64 " | %u!/#%+d\n",fp,fn,fc) < 0 ){
 						fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 						exit(EXIT_FAILURE);
@@ -613,7 +606,11 @@ void setupSearch(workStatus & st, searchData & sd){
 		fprintf(stderr, "-! or -# or -c argument is required\nuse -h for help\n");
 		exit(EXIT_FAILURE);
 	}
-	else if(z>1){
+	else if(st.factorial && st.compositorial && !st.primorial){
+		printf("Sieving for factors of factorial and compositorial\n");
+		fprintf(stderr, "Sieving for factors of factorial and compositorial\n");
+	}
+	else if(z>1 && st.primorial){
 		printf("\nSelect only one test type!\nuse -h for help\n");
 		fprintf(stderr, "Select only one test type!\nuse -h for help\n");
 		exit(EXIT_FAILURE);
@@ -893,7 +890,7 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 	}
 	free(smprime);
 	free(smpower);
-	sd.smcount = m;
+	sd.powcount = m;
 	fprintf(stderr,"Compressed %u power table terms to %u\n",(uint32_t)primelistsize,m);
 	if(boinc_is_standalone()){
 		printf("Compressed %u power table terms to %u\n",(uint32_t)primelistsize,m);
@@ -906,7 +903,7 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
                 printf( "ERROR: power table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
 		exit(EXIT_FAILURE);
 	}
-	pd.d_products = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
+	pd.d_primeproducts = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
 	if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: primeproducts array\n");
 		printf( "ERROR: clCreateBuffer failure.\n" );
@@ -918,10 +915,22 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 		printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	sclWriteNB(hardware, tablesize, pd.d_products, h_prime);
+	sclWriteNB(hardware, tablesize, pd.d_primeproducts, h_prime);
 	sclWrite(hardware, tablesize, pd.d_powers, h_power);
 	free(h_prime);
 	free(h_power);
+
+	// build kernels
+	pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"factorial_verifyslow",hardware, NULL);
+	pd.verify = sclGetCLSoftware(verify_cl,"factorial_verify",hardware, NULL);
+	if(pd.verifyslow.local_size[0] != 256){
+		pd.verifyslow.local_size[0] = 256;
+		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
+	}
+	if(pd.verify.local_size[0] != 256){
+		pd.verify.local_size[0] = 256;
+		fprintf(stderr, "Set verify kernel local size to 256\n");
+	}
 
 	// verify the new power table
 	sclSetGlobalSize( pd.verifyslow, stride );
@@ -940,10 +949,10 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 	sclSetKernelArg(pd.verifyslow, 0, sizeof(cl_mem), &d_verify);
 	sclSetKernelArg(pd.verifyslow, 1, sizeof(uint32_t), &start_factorial);
 
-	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &pd.d_products);
+	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &pd.d_primeproducts);
 	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_powers);
 	sclSetKernelArg(pd.verify, 2, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.smcount);
+	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.powcount);
 
 	sclSetKernelArg(pd.verifyreduce, 0, sizeof(cl_mem), &d_verify);
 	sclSetKernelArg(pd.verifyreduce, 1, sizeof(uint32_t), &ver_groups);
@@ -965,12 +974,15 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 		printf("error: power table verification failed\n");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr,"Verified power table (%" PRIu64 " bytes) starting sieve...\n", tablesize*2);
+	fprintf(stderr,"Verified factorial power table (%" PRIu64 " bytes)\n", tablesize*2);
 	if(boinc_is_standalone()){
-		printf("Verified power table (%" PRIu64 " bytes) starting sieve...\n", tablesize*2);
+		printf("Verified factorial power table (%" PRIu64 " bytes)\n", tablesize*2);
 	}
 	sclReleaseMemObject(d_verify);
-	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_products);
+	sclReleaseClSoft(pd.verifyslow);
+	sclReleaseClSoft(pd.verify);
+
+	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_primeproducts);
 	sclSetKernelArg(pd.setup, 5, sizeof(cl_mem), &pd.d_powers);
 	sclSetKernelArg(pd.setup, 6, sizeof(uint32_t), &start_factorial);
 
@@ -1014,7 +1026,7 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 	}
 
 	free(smprime);
-	sd.smcount = m;
+	sd.prodcount = m;
 	fprintf(stderr,"Compressed %u primes to %u products\n",(uint32_t)smsize,m);
 	if(boinc_is_standalone()){
 		printf("Compressed %u primes to %u products\n",(uint32_t)smsize,m);
@@ -1027,13 +1039,13 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
                 printf( "ERROR: prime product table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
 		exit(EXIT_FAILURE);
 	}
-	pd.d_products = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
+	pd.d_primeproducts = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
 	if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: primeproducts array\n");
 		printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	sclWriteNB(hardware, tablesize, pd.d_products, h_prime);
+	sclWriteNB(hardware, tablesize, pd.d_primeproducts, h_prime);
 
 	// send partial prime list to gpu
 	uint64_t itertablesize = (uint64_t)itersize*sizeof(cl_uint);
@@ -1070,6 +1082,18 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 	free(h_iterprime);
 	free(fullprimelist);
 
+	// build kernels
+	pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"primorial_verifyslow",hardware, NULL);
+	pd.verify = sclGetCLSoftware(verify_cl,"primorial_verify",hardware, NULL);
+	if(pd.verifyslow.local_size[0] != 256){
+		pd.verifyslow.local_size[0] = 256;
+		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
+	}
+	if(pd.verify.local_size[0] != 256){
+		pd.verify.local_size[0] = 256;
+		fprintf(stderr, "Set verify kernel local size to 256\n");
+	}
+
 	sclSetGlobalSize( pd.verifyslow, stride );
 	sclSetGlobalSize( pd.verify, stride );
 	uint32_t ver_groups = stride / 256;				// 10000
@@ -1089,9 +1113,9 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 	sclSetKernelArg(pd.verifyslow, 2, sizeof(uint32_t), &fplsize);
 
 	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_products);
+	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_primeproducts);
 	sclSetKernelArg(pd.verify, 2, sizeof(cl_mem), &pd.d_smallprimes);
-	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.smcount);
+	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.prodcount);
 	sclSetKernelArg(pd.verify, 4, sizeof(uint32_t), &sd.nlimit);
 
 	sclSetKernelArg(pd.verifyreduce, 0, sizeof(cl_mem), &d_verify);
@@ -1114,14 +1138,16 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 		printf("error: product/prime table verification failed\n");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr,"Verified prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables. starting sieve...\n", itertablesize, tablesize);
+	fprintf(stderr,"Verified primorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
 	if(boinc_is_standalone()){
-		printf("Verified prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables. starting sieve...\n", itertablesize, tablesize);
+		printf("Verified primorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
 	}
 	sclReleaseMemObject(d_verify);
 	sclReleaseMemObject(d_fullprimelist);
+	sclReleaseClSoft(pd.verifyslow);
+	sclReleaseClSoft(pd.verify);
 
-	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_products);
+	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_primeproducts);
 
 	sclSetKernelArg(pd.iterate, 5, sizeof(cl_mem), &pd.d_smallprimes);
 
@@ -1174,7 +1200,7 @@ void setupCompositeProducts(progData & pd, workStatus & st, searchData & sd, scl
 
 	free(composites);
 
-	sd.smcount = m;
+	sd.prodcount = m;
 	fprintf(stderr,"Compressed %u composites to %u products\n",(uint32_t)csize,m);
 	if(boinc_is_standalone()){
 		printf("Compressed %u composites to %u products\n",(uint32_t)csize,m);
@@ -1187,13 +1213,13 @@ void setupCompositeProducts(progData & pd, workStatus & st, searchData & sd, scl
                 printf( "ERROR: composite product table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
 		exit(EXIT_FAILURE);
 	}
-	pd.d_products = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
+	pd.d_compproducts = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
 	if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: primeproducts array\n");
+		fprintf(stderr, "ERROR: clCreateBuffer failure: d_compproducts array\n");
 		printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	sclWriteNB(hardware, tablesize, pd.d_products, h_comp);
+	sclWriteNB(hardware, tablesize, pd.d_compproducts, h_comp);
 
 	// send partial prime list to gpu
 	uint64_t itertablesize = (uint64_t)ipsize*sizeof(cl_uint);
@@ -1223,6 +1249,18 @@ void setupCompositeProducts(progData & pd, workStatus & st, searchData & sd, scl
 	free(h_comp);
 	free(fullprimelist);
 
+	// build kernels
+	pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"compositorial_verifyslow",hardware, NULL);
+	pd.verify = sclGetCLSoftware(verify_cl,"compositorial_verify",hardware, NULL);
+	if(pd.verifyslow.local_size[0] != 256){
+		pd.verifyslow.local_size[0] = 256;
+		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
+	}
+	if(pd.verify.local_size[0] != 256){
+		pd.verify.local_size[0] = 256;
+		fprintf(stderr, "Set verify kernel local size to 256\n");
+	}
+
 	sclSetGlobalSize( pd.verifyslow, stride );
 	sclSetGlobalSize( pd.verify, stride );
 	uint32_t ver_groups = stride / 256;				// 10000
@@ -1243,9 +1281,9 @@ void setupCompositeProducts(progData & pd, workStatus & st, searchData & sd, scl
 	sclSetKernelArg(pd.verifyslow, 3, sizeof(uint32_t), &st.nmax);
 
 	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_products);
+	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_compproducts);
 	sclSetKernelArg(pd.verify, 2, sizeof(cl_mem), &pd.d_smallprimes);
-	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.smcount);
+	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.prodcount);
 	sclSetKernelArg(pd.verify, 4, sizeof(uint32_t), &ipsize);
 	sclSetKernelArg(pd.verify, 5, sizeof(uint32_t), &st.nmin);
 	sclSetKernelArg(pd.verify, 6, sizeof(uint32_t), &st.nmax);
@@ -1270,15 +1308,22 @@ void setupCompositeProducts(progData & pd, workStatus & st, searchData & sd, scl
 		printf("error: product/prime table verification failed\n");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr,"Verified prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables. starting sieve...\n", itertablesize, tablesize);
+	fprintf(stderr,"Verified compositorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
 	if(boinc_is_standalone()){
-		printf("Verified prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables. starting sieve...\n", itertablesize, tablesize);
+		printf("Verified compositorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
 	}
 	sclReleaseMemObject(d_verify);
 	sclReleaseMemObject(d_fullprimelist);
+	sclReleaseClSoft(pd.verifyslow);
+	sclReleaseClSoft(pd.verify);
 
-	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_products);
-	sclSetKernelArg(pd.setup, 5, sizeof(uint32_t), &start_compositorial);
+	if(st.factorial && st.compositorial){
+		sclSetKernelArg(pd.setup, 7, sizeof(cl_mem), &pd.d_compproducts);
+	}
+	else{
+		sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_compproducts);
+		sclSetKernelArg(pd.setup, 5, sizeof(uint32_t), &start_compositorial);
+	}
 
 	sclSetKernelArg(pd.iterate, 5, sizeof(cl_mem), &pd.d_smallprimes);
 
@@ -1310,7 +1355,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		exit(EXIT_FAILURE);
 	}
 
-	// build kernels
         pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware, NULL);
         pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware, NULL);
         pd.addsmallprimes = sclGetCLSoftware(addsmallprimes_cl,"addsmallprimes",hardware, NULL);
@@ -1320,39 +1364,30 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	else{
 	       	pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware, "-D CKOVERFLOW=1" );
 	}
-	if(st.factorial){
-		pd.setup = sclGetCLSoftware(setup_cl,"setup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(iterate_cl,"iterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(check_cl,"check",hardware, NULL);
-		pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"verifyslow",hardware, NULL);
-		pd.verify = sclGetCLSoftware(verify_cl,"verify",hardware, NULL);
 
+	if(st.factorial && st.compositorial){
+		pd.setup = sclGetCLSoftware(setup_cl,"combined_setup",hardware, NULL);
+		pd.iterate = sclGetCLSoftware(iterate_cl,"combined_iterate",hardware, NULL);
+		pd.check = sclGetCLSoftware(check_cl,"combined_check",hardware, NULL);
+	}
+	else if(st.factorial){
+		pd.setup = sclGetCLSoftware(setup_cl,"factorial_setup",hardware, NULL);
+		pd.iterate = sclGetCLSoftware(iterate_cl,"factorial_iterate",hardware, NULL);
+		pd.check = sclGetCLSoftware(check_cl,"factorial_compositorial_check",hardware, NULL);
 	}
 	else if(st.primorial){
-		pd.setup = sclGetCLSoftware(primsetup_cl,"primsetup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(primiterate_cl,"primiterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(primcheck_cl,"primcheck",hardware, NULL);
-		pd.verifyslow = sclGetCLSoftware(primverifyslow_cl,"primverifyslow",hardware, NULL);
-		pd.verify = sclGetCLSoftware(primverify_cl,"primverify",hardware, NULL);
+		pd.setup = sclGetCLSoftware(setup_cl,"primorial_setup",hardware, NULL);
+		pd.iterate = sclGetCLSoftware(iterate_cl,"primorial_iterate",hardware, NULL);
+		pd.check = sclGetCLSoftware(check_cl,"primorial_check",hardware, NULL);
 	}
 	else if(st.compositorial){
-		pd.setup = sclGetCLSoftware(compsetup_cl,"compsetup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(compiterate_cl,"compiterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(check_cl,"check",hardware, NULL);
-		pd.verifyslow = sclGetCLSoftware(compverifyslow_cl,"compverifyslow",hardware, NULL);
-		pd.verify = sclGetCLSoftware(compverify_cl,"compverify",hardware, NULL);
+		pd.setup = sclGetCLSoftware(setup_cl,"compositorial_setup",hardware, NULL);
+		pd.iterate = sclGetCLSoftware(iterate_cl,"compositorial_iterate",hardware, NULL);
+		pd.check = sclGetCLSoftware(check_cl,"factorial_compositorial_check",hardware, NULL);
 	}
-	pd.verifyreduce = sclGetCLSoftware(verifyreduce_cl,"verifyreduce",hardware, NULL);
+	pd.verifyreduce = sclGetCLSoftware(verifyresult_cl,"verifyreduce",hardware, NULL);
 	pd.verifyresult = sclGetCLSoftware(verifyresult_cl,"verifyresult",hardware, NULL);
 
-	if(pd.verifyslow.local_size[0] != 256){
-		pd.verifyslow.local_size[0] = 256;
-		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
-	}
-	if(pd.verify.local_size[0] != 256){
-		pd.verify.local_size[0] = 256;
-		fprintf(stderr, "Set verifypow kernel local size to 256\n");
-	}
 	if(pd.verifyreduce.local_size[0] != 256){
 		pd.verifyreduce.local_size[0] = 256;
 		fprintf(stderr, "Set verifyreduce kernel local size to 256\n");
@@ -1596,14 +1631,23 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 			if(st.factorial){
 				setupPowerTable(pd, st, sd, hardware, h_primecount);
 			}
-			else if(st.primorial){
+			if(st.primorial){
 				setupPrimeProducts(pd, st, sd, hardware, h_primecount);
 			}
-			else if(st.compositorial){
+			if(st.compositorial){
 				setupCompositeProducts(pd, st, sd, hardware, h_primecount, h_iterprime, itersize);
 			}
+			if(st.factorial && st.compositorial){
+				sclSetKernelArg(pd.setup, 8, sizeof(uint32_t), &sd.powcount);
+				sclSetKernelArg(pd.setup, 9, sizeof(uint32_t), &sd.prodcount);
+			}
+			fprintf(stderr,"Starting Sieve...\n");
+			if(boinc_is_standalone()){
+				printf("Starting Sieve...\n");
+			}
+			sd.scount = (sd.powcount > sd.prodcount) ? sd.powcount : sd.prodcount;
 			smax = sstart + sd.sstep;
-			if(smax > sd.smcount)smax = sd.smcount;
+			if(smax > sd.scount)smax = sd.scount;
 			sclSetKernelArg(pd.setup, 3, sizeof(uint32_t), &sstart);
 			sclSetKernelArg(pd.setup, 4, sizeof(uint32_t), &smax);
 			kernel_ms = ProfilesclEnqueueKernel(hardware, pd.setup);
@@ -1615,9 +1659,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		}
 
 		// setup residue for nmin# / nmin! mod P
-		for(; sstart < sd.smcount; sstart += sd.sstep){
+		for(; sstart < sd.scount; sstart += sd.sstep){
 			smax = sstart + sd.sstep;
-			if(smax > sd.smcount)smax = sd.smcount;
+			if(smax > sd.scount)smax = sd.scount;
 			sclSetKernelArg(pd.setup, 3, sizeof(uint32_t), &sstart);
 			sclSetKernelArg(pd.setup, 4, sizeof(uint32_t), &smax);
 			if(kernelq == 0){
@@ -1730,20 +1774,32 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 }
 
 
+void reset_data(workStatus & st, searchData & sd){
+	st.checksum = 0;
+	st.primecount = 0;
+	st.factorcount = 0;
+	sd.scount = 0;
+	sd.powcount = 0;
+	sd.prodcount = 0;
+	st.factorial = false;
+	st.primorial = false;
+	st.compositorial = false;
+}
+
+
 void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 
 	int goodtest = 0;
 
-	printf("Beginning self test of 12 ranges.\n");
+	printf("Beginning self test of 16 ranges.\n");
 
 	time_t start, finish;
 	time(&start);
 
 	printf("Starting Factorial tests\n\n");
 //	-p 100e6 -P 101e6 -n 1e6 -N 2e6 -!
+	reset_data(st, sd);
 	st.factorial = true;
-	st.primorial = false;
-	st.compositorial = false;
 	st.pmin = 100000000;
 	st.pmax = 101000000;
 	st.nmin = 1000000;
@@ -1758,14 +1814,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 1 failed.\n\n");
 		fprintf(stderr,"test case 1 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 1e12 -P 100001e7 -n 10000 -N 2e6 -!
+	reset_data(st, sd);
 	st.factorial = true;
-	st.primorial = false;
-	st.compositorial = false;
 	st.pmin = 1000000000000;
 	st.pmax = 1000010000000;
 	st.nmin = 10000;
@@ -1780,14 +1832,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 2 failed.\n\n");
 		fprintf(stderr,"test case 2 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 101 -P 100000 -n 101 -N 1e6 -!
+	reset_data(st, sd);
 	st.factorial = true;
-	st.primorial = false;
-	st.compositorial = false;
 	st.pmin = 101;
 	st.pmax = 100000;
 	st.nmin = 101;
@@ -1802,14 +1850,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 3 failed.\n\n");
 		fprintf(stderr,"test case 3 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 1e12 -P 1000001e6 -n 10e7 -N 11e7 -!
+	reset_data(st, sd);
 	st.factorial = true;
-	st.primorial = false;
-	st.compositorial = false;
 	st.pmin = 1000000000000;
 	st.pmax = 1000001000000;
 	st.nmin = 100000000;
@@ -1824,15 +1868,11 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 4 failed.\n\n");
 		fprintf(stderr,"test case 4 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 	printf("Starting Primorial tests\n\n");
 //	-p 100e6 -P 101e6 -n 101 -N 25e6 -#
-	st.factorial = false;
+	reset_data(st, sd);
 	st.primorial = true;
-	st.compositorial = false;
 	st.pmin = 100000000;
 	st.pmax = 101000000;
 	st.nmin = 101;
@@ -1847,14 +1887,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 5 failed.\n\n");
 		fprintf(stderr,"test case 5 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 101 -P 2e6 -n 101 -N 2e6 -#
-	st.factorial = false;
+	reset_data(st, sd);
 	st.primorial = true;
-	st.compositorial = false;
 	st.pmin = 101;
 	st.pmax = 2000000;
 	st.nmin = 101;
@@ -1869,14 +1905,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 6 failed.\n\n");
 		fprintf(stderr,"test case 6 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 1e11 -P 100005e6 -n 9e6 -N 11e7 -#
-	st.factorial = false;
+	reset_data(st, sd);
 	st.primorial = true;
-	st.compositorial = false;
 	st.pmin = 100000000000;
 	st.pmax = 100005000000;
 	st.nmin = 9000000;
@@ -1891,14 +1923,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 7 failed.\n\n");
 		fprintf(stderr,"test case 7 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-n 600000 -N 30e6 -p 1730720716e6 -P 1730720720e6 -#
-	st.factorial = false;
+	reset_data(st, sd);
 	st.primorial = true;
-	st.compositorial = false;
 	st.pmin = 1730720716000000;
 	st.pmax = 1730720720000000;
 	st.nmin = 600000;
@@ -1913,14 +1941,10 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 8 failed.\n\n");
 		fprintf(stderr,"test case 8 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 	printf("Starting Compositorial tests\n\n");
 //	-p 200e6 -P 20001e4 -n 101 -N 26e6 -c
-	st.factorial = false;
-	st.primorial = false;
+	reset_data(st, sd);
 	st.compositorial = true;
 	st.pmin = 200000000;
 	st.pmax = 200010000;
@@ -1936,13 +1960,9 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 9 failed.\n\n");
 		fprintf(stderr,"test case 9 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 101 -P 1e5 -n 101 -N 1e6 -c
-	st.factorial = false;
-	st.primorial = false;
+	reset_data(st, sd);
 	st.compositorial = true;
 	st.pmin = 101;
 	st.pmax = 100000;
@@ -1958,13 +1978,9 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 10 failed.\n\n");
 		fprintf(stderr,"test case 10 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-p 2e11 -P 200005e6 -n 15e6 -N 2e7 -c
-	st.factorial = false;
-	st.primorial = false;
+	reset_data(st, sd);
 	st.compositorial = true;
 	st.pmin = 200000000000;
 	st.pmax = 200005000000;
@@ -1980,13 +1996,9 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 11 failed.\n\n");
 		fprintf(stderr,"test case 11 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
 
 //	-n 700000 -N 25e6 -p 1e12 -P 1000001e6 -c
-	st.factorial = false;
-	st.primorial = false;
+	reset_data(st, sd);
 	st.compositorial = true;
 	st.pmin = 1000000000000;
 	st.pmax = 1000001000000;
@@ -2002,12 +2014,86 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 		printf("test case 12 failed.\n\n");
 		fprintf(stderr,"test case 12 failed.\n");
 	}
-	st.checksum = 0;
-	st.primecount = 0;
-	st.factorcount = 0;
+
+	printf("Starting Combined Factorial+Compositorial tests\n\n");
+//	-p 1e11 -P 10001e7 -n 96000 -N 2e6 -! -c
+	reset_data(st, sd);
+	st.factorial = true;
+	st.compositorial = true;
+	st.pmin = 100000000000;
+	st.pmax = 100010000000;
+	st.nmin = 96000;
+	st.nmax = 2000000;
+	cl_sieve( hardware, st, sd );
+	if( st.factorcount == 27 && st.primecount == 394403 && st.checksum == 0x00D214CC0EF0ECB4 ){
+		printf("test case 13 passed.\n\n");
+		fprintf(stderr,"test case 13 passed.\n");
+		++goodtest;
+	}
+	else{
+		printf("test case 13 failed.\n\n");
+		fprintf(stderr,"test case 13 failed.\n");
+	}
+
+//	-p 101 -P 11e4 -n 101 -N 1e6 -c -!
+	reset_data(st, sd);
+	st.factorial = true;
+	st.compositorial = true;
+	st.pmin = 101;
+	st.pmax = 110000;
+	st.nmin = 101;
+	st.nmax = 1000000;
+	cl_sieve( hardware, st, sd );
+	if( st.factorcount == 84077 && st.primecount == 10433 && st.checksum == 0x00000000EFB634E9 ){
+		printf("test case 14 passed.\n\n");
+		fprintf(stderr,"test case 14 passed.\n");
+		++goodtest;
+	}
+	else{
+		printf("test case 14 failed.\n\n");
+		fprintf(stderr,"test case 14 failed.\n");
+	}
+
+//	-p 101e8 -P 10101e6 -n 115e5 -N 125e5 -! -c
+	reset_data(st, sd);
+	st.factorial = true;
+	st.compositorial = true;
+	st.pmin = 10100000000;
+	st.pmax = 10101000000;
+	st.nmin = 11500000;
+	st.nmax = 12500000;
+	cl_sieve( hardware, st, sd );
+	if( st.factorcount == 19 && st.primecount == 43374 && st.checksum == 0x0002578EA9FD63C7 ){
+		printf("test case 15 passed.\n\n");
+		fprintf(stderr,"test case 15 passed.\n");
+		++goodtest;
+	}
+	else{
+		printf("test case 15 failed.\n\n");
+		fprintf(stderr,"test case 15 failed.\n");
+	}
+
+//	-p 2e12 -P 200002e7 -n 670000 -N 2460000 -! -c
+	reset_data(st, sd);
+	st.factorial = true;
+	st.compositorial = true;
+	st.pmin = 2000000000000;
+	st.pmax = 2000020000000;
+	st.nmin = 670000;
+	st.nmax = 2460000;
+	cl_sieve( hardware, st, sd );
+	if( st.factorcount == 3 && st.primecount == 706162 && st.checksum == 0x1D63BBC574E8D50F ){
+		printf("test case 16 passed.\n\n");
+		fprintf(stderr,"test case 16 passed.\n");
+		++goodtest;
+	}
+	else{
+		printf("test case 16 failed.\n\n");
+		fprintf(stderr,"test case 16 failed.\n");
+	}
 
 //	done
-	if(goodtest == 12){
+	if(goodtest == 16){
 		printf("All test cases completed successfully!\n");
 		fprintf(stderr, "All test cases completed successfully!\n");
 	}

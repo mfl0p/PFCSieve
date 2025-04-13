@@ -1,9 +1,14 @@
 
 // cl_sieve.h
 
+#define FACTORIAL 0
+#define PRIMORIAL 1
+#define COMPOSITORIAL 2
+
 typedef struct {
 	cl_ulong p;
 	cl_int nc;
+	cl_int type;
 }factor;
 
 typedef struct {
@@ -14,7 +19,7 @@ typedef struct {
 
 typedef struct {
 	uint64_t maxmalloc;
-	uint32_t computeunits, nstep, sstep, smcount, numresults, threadcount, range, psize, numgroups, nlimit;
+	uint32_t computeunits, nstep, sstep, powcount, prodcount, scount, numresults, threadcount, range, psize, numgroups, nlimit;
 	bool test, compute, write_state_a_next;
 }searchData;
 
@@ -25,7 +30,8 @@ typedef struct {
 	cl_mem d_primecount;
 	cl_mem d_smallprimes;
 	cl_mem d_powers;
-	cl_mem d_products;
+	cl_mem d_primeproducts;
+	cl_mem d_compproducts;
 	sclSoft check, iterate, clearn, clearresult, setup, getsegprimes, addsmallprimes, verifyslow, verify, verifyreduce, verifyresult;
 }progData;
 

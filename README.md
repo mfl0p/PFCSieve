@@ -31,6 +31,7 @@ command line options
 * -!	Use factorial mode
 * -#	Use primorial mode
 * -c	Use compositorial mode
+*		Note: -! -c can be used together to find factors of both at the same time.
 * -n #	Start primorial n#+-1, factorial n!+-1, or compositorial n!/#+-1
 * -N #	End primorial N#+-1, factorial N!+-1, or compositorial N!/#+-1
 * 		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive
