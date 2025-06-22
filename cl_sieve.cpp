@@ -1608,7 +1608,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		int32_t wheelidx;
 		uint64_t kernel_start = st.p;
 		findWheelOffset(kernel_start, wheelidx);
-
+		
 		sclSetKernelArg(pd.getsegprimes, 0, sizeof(uint64_t), &kernel_start);
 		sclSetKernelArg(pd.getsegprimes, 1, sizeof(uint64_t), &stop);
 		sclSetKernelArg(pd.getsegprimes, 2, sizeof(int32_t), &wheelidx);
@@ -1721,14 +1721,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		// checksum kernel
 		sclEnqueueKernel(hardware, pd.check);
 
-		uint64_t nextp = st.p + sd.range;
-		if(nextp < st.p){
-			// ck overflow at 2^64
-			break;
-		}
-		else{
-			st.p = nextp;
-		}
+		st.p = stop;
 
 	}
 

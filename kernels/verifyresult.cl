@@ -43,7 +43,7 @@ ulong add(ulong a, ulong b, ulong p){
 }
 
 // .s0=p, .s1=q, .s2=r2, .s3=one, .s4=two, .s5=nmo
-__constant ulong8 prime = (ulong8)(18446744073709551557ULL, 3751880150584993549ULL, 3481, 59, 118, 18446744073709551498ULL, 0, 0);
+__constant ulong8 prime = (ulong8)(18446744073709551557UL, 3751880150584993549UL, 3481, 59, 118, 18446744073709551498UL, 0, 0);
 
 __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void verifyreduce(	__global ulong4 * g_verify,
 										const uint num_totals ){
