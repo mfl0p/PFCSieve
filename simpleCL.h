@@ -71,50 +71,51 @@ void sclSetGlobalSizeExact( sclSoft & software, uint64_t size );
 /* ####### Device memory allocation read and write  ####### */
 
 //cl_mem 			sclMalloc( sclHard hardware, cl_int mode, size_t size );
-void 			sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
-void 			sclWriteNB( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
-void			sclReadNB( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
-void			sclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
+void 		sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
+void 		sclWriteNB( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
+void		sclReadNB( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
+void		sclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 
 /* ######################################################## */
 
 /* ####### inicialization of sclSoft structs  ############## */
-sclSoft 		sclGetCLSoftware( const char* source, const char* name, sclHard hardware, const char * options );
+sclSoft 	sclGetCLSoftware( const char* source, const char* name, sclHard hardware, const char * options );
+sclSoft 	sclGetCLSoftwareWithCommon( const char* common, const char* source, const char* name, sclHard hardware, const char * options );
 
 /* ######################################################## */
 
 /* ####### Release and retain OpenCL objects ############## */
 
-void 			sclReleaseClSoft( sclSoft soft );
-void 			sclReleaseClHard( sclHard hard );
-void			sclReleaseMemObject( cl_mem object );
+void 		sclReleaseClSoft( sclSoft soft );
+void 		sclReleaseClHard( sclHard hard );
+void		sclReleaseMemObject( cl_mem object );
 
 /* ######################################################## */
 
 /* ####### Debug functions ################################ */
 
-void 			sclPrintErrorFlags( cl_int flag );
+void 		sclPrintErrorFlags( cl_int flag );
 
 /* ######################################################## */
 
 /* ####### Device execution ############################### */
 
-void			sclEnqueueKernel( sclHard hardware, sclSoft software );
-cl_event		sclEnqueueKernelEvent( sclHard hardware, sclSoft software );
-double			ProfilesclEnqueueKernel( sclHard hardware, sclSoft software );
-double			ProfilesclEnqueueKernelNS( sclHard hardware, sclSoft software );
+void		sclEnqueueKernel( sclHard hardware, sclSoft software );
+cl_event	sclEnqueueKernelEvent( sclHard hardware, sclSoft software );
+double		ProfilesclEnqueueKernel( sclHard hardware, sclSoft software );
+double		ProfilesclEnqueueKernelNS( sclHard hardware, sclSoft software );
 
 /* ######################################################## */
 
 /* ####### Queue management ############################### */
 
-cl_int			sclFinish( sclHard hardware );
+cl_int		sclFinish( sclHard hardware );
 
 /* ######################################################## */
 
 /* ####### Kernel argument setting ######################## */
 
-void 			sclSetKernelArg( sclSoft software, int argnum, size_t typeSize, void *argument );
+void 		sclSetKernelArg( sclSoft software, int argnum, size_t typeSize, void *argument );
 
 /* ######################################################## */
 
@@ -125,10 +126,10 @@ void 			sclSetKernelArg( sclSoft software, int argnum, size_t typeSize, void *ar
 /* INTERNAL FUNCITONS */
 
 /* ####### cl software management ######################### */
-void 			_sclBuildProgram( cl_program program, cl_device_id devices, const char* pName, const char * options );
-cl_kernel 		_sclCreateKernel( sclSoft software );
-cl_program 		_sclCreateProgram( const char* program_source, cl_context context );
-char* 			_sclLoadProgramSource( const char *filename );
+void 		_sclBuildProgram( cl_program program, cl_device_id devices, const char* pName, const char * options );
+cl_kernel 	_sclCreateKernel( sclSoft software );
+cl_program 	_sclCreateProgram( const char* program_source, cl_context context );
+char* 		_sclLoadProgramSource( const char *filename );
 
 /* ######################################################## */
 

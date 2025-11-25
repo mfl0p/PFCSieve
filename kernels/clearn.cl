@@ -6,7 +6,6 @@
 
 */
 
-
 __kernel void clearn(__global uint *primecount){
 
 	const uint i = get_global_id(0);

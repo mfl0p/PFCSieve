@@ -84,19 +84,19 @@ static int parse_option(int opt, char *arg, const char *source, workStatus & st,
     case '!':
       st.factorial = true;
       fprintf(stderr,"-! argument specified for factorial mode.\n");
-      printf("\n-! argument specified for factorial mode.\n\n");
+      printf("-! argument specified for factorial mode.\n");
       break;
 
     case '#':
       st.primorial = true;
       fprintf(stderr,"-# argument specified for primorial mode.\n");
-      printf("\n-# argument specified for primorial mode.\n\n");
+      printf("-# argument specified for primorial mode.\n");
       break;
 
     case 'c':
       st.compositorial = true;
       fprintf(stderr,"-c argument specified for compositorial mode.\n");
-      printf("\n-c argument specified for compositorial mode.\n\n");
+      printf("-c argument specified for compositorial mode.\n");
       break;
 
     case 'h':

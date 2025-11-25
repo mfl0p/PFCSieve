@@ -1,6 +1,6 @@
 /*
 	PFCSieve
-	Bryan Little, April 2025
+	Bryan Little, Nov 2025
 	
 	with contributions by Yves Gallot, Mark Rodenkirch, and Kim Walisch
 
@@ -17,6 +17,7 @@
 #include <cinttypes>
 #include <math.h>
 #include <omp.h>
+#include <ctime>
 
 #include "boinc_api.h"
 #include "boinc_opencl.h"
@@ -32,6 +33,7 @@
 #include "verifyslow.h"
 #include "verify.h"
 #include "verifyresult.h"
+#include "common.h"
 
 #include "primesieve.h"
 #include "putil.h"
@@ -79,6 +81,8 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseMemObject(pd.d_sum);
 	sclReleaseMemObject(pd.d_primes);
 	sclReleaseMemObject(pd.d_primecount);
+	sclReleaseMemObject(pd.d_primeproducts);
+	sclReleaseMemObject(pd.d_powers);
 	sclReleaseClSoft(pd.check);
 	sclReleaseClSoft(pd.clearn);
 	sclReleaseClSoft(pd.clearresult);
@@ -88,16 +92,8 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
         sclReleaseClSoft(pd.addsmallprimes);
 	sclReleaseClSoft(pd.verifyreduce);
 	sclReleaseClSoft(pd.verifyresult);
-	if(st.factorial){
-		sclReleaseMemObject(pd.d_primeproducts);
-		sclReleaseMemObject(pd.d_powers);
-	}
-	if(st.primorial){
-		sclReleaseMemObject(pd.d_primeproducts);
-		sclReleaseMemObject(pd.d_smallprimes);
-	}
-	if(st.compositorial){
-		sclReleaseMemObject(pd.d_compproducts);
+
+	if(st.primorial || st.compositorial){
 		sclReleaseMemObject(pd.d_smallprimes);
 	}
 }
@@ -606,10 +602,6 @@ void setupSearch(workStatus & st, searchData & sd){
 		fprintf(stderr, "-! or -# or -c argument is required\nuse -h for help\n");
 		exit(EXIT_FAILURE);
 	}
-	else if(st.factorial && st.compositorial && !st.primorial){
-		printf("Sieving for factors of factorial and compositorial\n");
-		fprintf(stderr, "Sieving for factors of factorial and compositorial\n");
-	}
 	else if(z>1 && st.primorial){
 		printf("\nSelect only one test type!\nuse -h for help\n");
 		fprintf(stderr, "Select only one test type!\nuse -h for help\n");
@@ -838,7 +830,7 @@ cl_uint2 getPower(uint32_t prime, uint32_t startN){
 	return (cl_uint2){totalpower, curBit};
 }
 
-// factorial power table
+// factorial power table, primorial and compositorial product table
 void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard hardware, uint32_t * h_primecount ){
 
 	cl_int err = 0;
@@ -884,14 +876,14 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 	}
 	free(smprime);
 	free(smpower);
-	sd.powcount = m;
-	fprintf(stderr,"Compressed %u power table terms to %u\n",(uint32_t)primelistsize,m);
+	sd.scount = m;
+	fprintf(stderr,"Compressed %u primes to %u products\n",(uint32_t)primelistsize,m);
 	if(boinc_is_standalone()){
-		printf("Compressed %u power table terms to %u\n",(uint32_t)primelistsize,m);
+		printf("Compressed %u primes to %u products\n",(uint32_t)primelistsize,m);
 	}
 
 	// send read only prime/power tables to gpu
-	tablesize = (uint64_t)m*8;	// cl_ulong or cl_uint2
+	tablesize = (uint64_t)m*sizeof(cl_ulong);	// cl_ulong or cl_uint2
 	if( sd.maxmalloc < tablesize ){
 		fprintf(stderr, "ERROR: power table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
                 printf( "ERROR: power table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
@@ -915,8 +907,8 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 	free(h_power);
 
 	// build kernels
-	pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"factorial_verifyslow",hardware, NULL);
-	pd.verify = sclGetCLSoftware(verify_cl,"factorial_verify",hardware, NULL);
+	pd.verifyslow = sclGetCLSoftwareWithCommon(common_cl, verifyslow_cl,"factorial_verifyslow",hardware, NULL);
+	pd.verify = sclGetCLSoftwareWithCommon(common_cl, verify_cl,"factorial_verify",hardware, NULL);
 	if(pd.verifyslow.local_size[0] != 256){
 		pd.verifyslow.local_size[0] = 256;
 		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
@@ -946,7 +938,7 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &pd.d_primeproducts);
 	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_powers);
 	sclSetKernelArg(pd.verify, 2, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.powcount);
+	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.scount);
 
 	sclSetKernelArg(pd.verifyreduce, 0, sizeof(cl_mem), &d_verify);
 	sclSetKernelArg(pd.verifyreduce, 1, sizeof(uint32_t), &ver_groups);
@@ -964,106 +956,36 @@ void setupPowerTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 	sclRead(hardware, 6*sizeof(uint32_t), pd.d_primecount, h_primecount);
 	// flag set if there is a gpu power table error
 	if(h_primecount[3] == 1){
-		fprintf(stderr,"error: power table verification failed\n");
-		printf("error: power table verification failed\n");
+		fprintf(stderr,"error: product/power table verification failed\n");
+		printf("error: product/power table verification failed\n");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr,"Verified factorial power table (%" PRIu64 " bytes)\n", tablesize*2);
+	fprintf(stderr,"Verified product/power table (%" PRIu64 " bytes)\n", tablesize*2);
 	if(boinc_is_standalone()){
-		printf("Verified factorial power table (%" PRIu64 " bytes)\n", tablesize*2);
+		printf("Verified product/power table (%" PRIu64 " bytes)\n", tablesize*2);
 	}
 	sclReleaseMemObject(d_verify);
 	sclReleaseClSoft(pd.verifyslow);
 	sclReleaseClSoft(pd.verify);
 
 	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_primeproducts);
-	sclSetKernelArg(pd.setup, 5, sizeof(cl_mem), &pd.d_powers);
-	sclSetKernelArg(pd.setup, 6, sizeof(uint32_t), &start_factorial);
+	if(st.factorial || st.compositorial){
+		sclSetKernelArg(pd.setup, 5, sizeof(cl_mem), &pd.d_powers);
+		sclSetKernelArg(pd.setup, 6, sizeof(uint32_t), &start_factorial);
+	}
 
-	sd.nlimit = st.nmax;
 }
 
-// primorial product and prime tables
-void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard hardware, uint32_t * h_primecount ){
 
+// primorial/compositorial product and prime iteration tables
+void verifyIterTable(progData & pd, workStatus & st, searchData & sd, sclHard hardware, uint32_t * h_primecount ){
 	cl_int err = 0;
 	uint32_t stride = 2560000;
-	uint32_t start_primorial = st.nmin-1;
-	uint32_t end_primorial = st.nmax-1;
-	uint64_t totalprimes = 0;
-
-	size_t smsize;
-	uint32_t * smprime = (uint32_t*)primesieve_generate_primes(2, start_primorial, &smsize, UINT32_PRIMES);
-	totalprimes+=smsize;
-
-	size_t itersize;
-	uint32_t * h_iterprime = (uint32_t*)primesieve_generate_primes(start_primorial+1, end_primorial, &itersize, UINT32_PRIMES);
-	totalprimes+=itersize;
-	sd.nlimit = itersize;
-
-	uint64_t tablesize = smsize*sizeof(cl_ulong);
-	cl_ulong * h_prime = (cl_ulong *)malloc(tablesize);
-	if( h_prime == NULL ){
-		fprintf(stderr,"malloc error: h_prime\n");
-		exit(EXIT_FAILURE);
-	}
-
-	// compress the table by combining primes
-	uint32_t m=0;
-	for(uint32_t i=0; i<smsize; ++m){
-		h_prime[m] = smprime[i];
-		for(++i; i<smsize; ++i){
-			unsigned __int128 pp = (unsigned __int128)h_prime[m] * smprime[i];
-			if(pp > 0xFFFFFFFFFFFFFFFF) break;
-			h_prime[m] = pp;
-		}
-	}
-
-	free(smprime);
-	sd.prodcount = m;
-	fprintf(stderr,"Compressed %u primes to %u products\n",(uint32_t)smsize,m);
-	if(boinc_is_standalone()){
-		printf("Compressed %u primes to %u products\n",(uint32_t)smsize,m);
-	}
-
-	// send prime product table to gpu
-	tablesize = (uint64_t)m*sizeof(cl_ulong);
-	if( sd.maxmalloc < tablesize ){
-		fprintf(stderr, "ERROR: prime product table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
-                printf( "ERROR: prime product table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
-		exit(EXIT_FAILURE);
-	}
-	pd.d_primeproducts = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
-	if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: primeproducts array\n");
-		printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	sclWriteNB(hardware, tablesize, pd.d_primeproducts, h_prime);
-
-	// send partial prime list to gpu
-	uint64_t itertablesize = (uint64_t)itersize*sizeof(cl_uint);
-	if( sd.maxmalloc < itertablesize ){
-		fprintf(stderr, "ERROR: prime table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", itertablesize, sd.maxmalloc);
-                printf( "ERROR: prime table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", itertablesize, sd.maxmalloc);
-		exit(EXIT_FAILURE);
-	}
-	pd.d_smallprimes = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, itertablesize, NULL, &err );
-	if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: SmallPrimes array\n");
-		printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	sclWriteNB(hardware, itertablesize, pd.d_smallprimes, h_iterprime);
 
 	// verify product and partial prime tables
 	size_t fullprimelistsize;
-	uint32_t * fullprimelist = (uint32_t*)primesieve_generate_primes(2, st.nmax, &fullprimelistsize, UINT32_PRIMES);
-	if(fullprimelistsize != totalprimes){
-		fprintf(stderr, "ERROR: CPU sieve failure.\n");
-                printf( "ERROR: CPU sieve failure.\n" );
-		exit(EXIT_FAILURE);
-	}
+	uint32_t n_end = (st.primorial) ? st.nmax-1 : st.nmax+320;
+	uint32_t * fullprimelist = (uint32_t*)primesieve_generate_primes(2, n_end, &fullprimelistsize, UINT32_PRIMES);
 	cl_mem d_fullprimelist = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, fullprimelistsize*sizeof(cl_uint), NULL, &err );
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
@@ -1071,14 +993,11 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 		exit(EXIT_FAILURE);
 	}
 	sclWrite(hardware, fullprimelistsize*sizeof(cl_uint), d_fullprimelist, fullprimelist);
-
-	free(h_prime);
-	free(h_iterprime);
 	free(fullprimelist);
 
 	// build kernels
-	pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"primorial_verifyslow",hardware, NULL);
-	pd.verify = sclGetCLSoftware(verify_cl,"primorial_verify",hardware, NULL);
+	pd.verifyslow = sclGetCLSoftwareWithCommon(common_cl, verifyslow_cl,"primorial_verifyslow",hardware, NULL);
+	pd.verify = sclGetCLSoftwareWithCommon(common_cl, verify_cl,"primorial_verify",hardware, NULL);
 	if(pd.verifyslow.local_size[0] != 256){
 		pd.verifyslow.local_size[0] = 256;
 		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
@@ -1109,8 +1028,8 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &d_verify);
 	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_primeproducts);
 	sclSetKernelArg(pd.verify, 2, sizeof(cl_mem), &pd.d_smallprimes);
-	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.prodcount);
-	sclSetKernelArg(pd.verify, 4, sizeof(uint32_t), &sd.nlimit);
+	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.scount);
+	sclSetKernelArg(pd.verify, 4, sizeof(uint32_t), &sd.itersize);
 
 	sclSetKernelArg(pd.verifyreduce, 0, sizeof(cl_mem), &d_verify);
 	sclSetKernelArg(pd.verifyreduce, 1, sizeof(uint32_t), &ver_groups);
@@ -1128,202 +1047,21 @@ void setupPrimeProducts(progData & pd, workStatus & st, searchData & sd, sclHard
 	sclRead(hardware, 6*sizeof(uint32_t), pd.d_primecount, h_primecount);
 	// flag set if there is a gpu product/prime table error
 	if(h_primecount[3] == 1){
-		fprintf(stderr,"error: product/prime table verification failed\n");
-		printf("error: product/prime table verification failed\n");
+		fprintf(stderr,"error: product/iteration table verification failed\n");
+		printf("error: product/iteration table verification failed\n");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr,"Verified primorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
+	fprintf(stderr,"Verified prime table (%" PRIu64 " bytes)\n", (uint64_t)sd.itersize*sizeof(cl_uint));
 	if(boinc_is_standalone()){
-		printf("Verified primorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
+		printf("Verified prime table (%" PRIu64 " bytes)\n", (uint64_t)sd.itersize*sizeof(cl_uint));
 	}
 	sclReleaseMemObject(d_verify);
 	sclReleaseMemObject(d_fullprimelist);
 	sclReleaseClSoft(pd.verifyslow);
 	sclReleaseClSoft(pd.verify);
 
-	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_primeproducts);
-
-	sclSetKernelArg(pd.iterate, 5, sizeof(cl_mem), &pd.d_smallprimes);
-
 }
 
-// compositorial product and prime tables
-void setupCompositeProducts(progData & pd, workStatus & st, searchData & sd, sclHard hardware, uint32_t * h_primecount, uint32_t * h_iterprime, uint32_t ipsize ){
-
-	cl_int err = 0;
-	uint32_t stride = 2560000;
-	uint32_t start_compositorial = st.nmin-1;
-
-	size_t smsize;
-	uint32_t * smprime = (uint32_t*)primesieve_generate_primes(2, start_compositorial, &smsize, UINT32_PRIMES);
-
-	uint32_t * composites = (uint32_t *)malloc(st.nmin*sizeof(uint32_t));
-	if( composites == NULL ){
-		fprintf(stderr,"malloc error: composites\n");
-		exit(EXIT_FAILURE);
-	}
-
-	uint32_t csize=0;
-	for(uint32_t i=0,n=2; n<st.nmin; ++n){
-		if(n == smprime[i]){
-			++i;
-			continue;
-		}
-		composites[csize++] = n;
-	}
-
-	free(smprime);
-
-	uint64_t tablesize = csize*sizeof(cl_ulong);
-	cl_ulong * h_comp = (cl_ulong *)malloc(tablesize);
-	if( h_comp == NULL ){
-		fprintf(stderr,"malloc error: h_comp\n");
-		exit(EXIT_FAILURE);
-	}
-
-	// compress the table by combining composites
-	uint32_t m=0;
-	for(uint32_t i=0; i<csize; ++m){
-		h_comp[m] = composites[i];
-		for(++i; i<csize; ++i){
-			unsigned __int128 cc = (unsigned __int128)h_comp[m] * composites[i];
-			if(cc > 0xFFFFFFFFFFFFFFFF) break;
-			h_comp[m] = cc;
-		}
-	}
-
-	free(composites);
-
-	sd.prodcount = m;
-	fprintf(stderr,"Compressed %u composites to %u products\n",(uint32_t)csize,m);
-	if(boinc_is_standalone()){
-		printf("Compressed %u composites to %u products\n",(uint32_t)csize,m);
-	}
-
-	// send read only composite product table to gpu
-	tablesize = (uint64_t)m*sizeof(cl_ulong);
-	if( sd.maxmalloc < tablesize ){
-		fprintf(stderr, "ERROR: composite product table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
-                printf( "ERROR: composite product table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", tablesize, sd.maxmalloc);
-		exit(EXIT_FAILURE);
-	}
-	pd.d_compproducts = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, tablesize, NULL, &err );
-	if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: d_compproducts array\n");
-		printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	sclWriteNB(hardware, tablesize, pd.d_compproducts, h_comp);
-
-	// send partial prime list to gpu
-	uint64_t itertablesize = (uint64_t)ipsize*sizeof(cl_uint);
-	if( sd.maxmalloc < itertablesize ){
-		fprintf(stderr, "ERROR: prime table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", itertablesize, sd.maxmalloc);
-	        printf( "ERROR: prime table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", itertablesize, sd.maxmalloc);
-		exit(EXIT_FAILURE);
-	}
-	pd.d_smallprimes = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, itertablesize, NULL, &err );
-	if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: SmallPrimes array\n");
-		printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	sclWriteNB(hardware, itertablesize, pd.d_smallprimes, h_iterprime);
-
-	// verify product and partial prime tables
-	size_t fullprimelistsize;
-	uint32_t * fullprimelist = (uint32_t*)primesieve_generate_primes(2, st.nmax, &fullprimelistsize, UINT32_PRIMES);
-	cl_mem d_fullprimelist = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, fullprimelistsize*sizeof(cl_uint), NULL, &err );
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	sclWrite(hardware, fullprimelistsize*sizeof(cl_uint), d_fullprimelist, fullprimelist);
-	free(h_comp);
-	free(fullprimelist);
-
-	// build kernels
-	pd.verifyslow = sclGetCLSoftware(verifyslow_cl,"compositorial_verifyslow",hardware, NULL);
-	pd.verify = sclGetCLSoftware(verify_cl,"compositorial_verify",hardware, NULL);
-	if(pd.verifyslow.local_size[0] != 256){
-		pd.verifyslow.local_size[0] = 256;
-		fprintf(stderr, "Set verifyslow kernel local size to 256\n");
-	}
-	if(pd.verify.local_size[0] != 256){
-		pd.verify.local_size[0] = 256;
-		fprintf(stderr, "Set verify kernel local size to 256\n");
-	}
-
-	sclSetGlobalSize( pd.verifyslow, stride );
-	sclSetGlobalSize( pd.verify, stride );
-	uint32_t ver_groups = stride / 256;				// 10000
-	sclSetGlobalSize( pd.verifyreduce, ver_groups );
-	uint32_t red_groups = (ver_groups / 256)+1;			// 40
-	sclSetGlobalSize( pd.verifyresult, red_groups );
-	cl_mem d_verify = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, ver_groups*sizeof(cl_ulong4), NULL, &err );
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-
-	uint32_t fplsize = (uint32_t)fullprimelistsize;
-	sclSetKernelArg(pd.verifyslow, 0, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verifyslow, 1, sizeof(cl_mem), &d_fullprimelist);
-	sclSetKernelArg(pd.verifyslow, 2, sizeof(uint32_t), &fplsize);
-	sclSetKernelArg(pd.verifyslow, 3, sizeof(uint32_t), &st.nmax);
-
-	sclSetKernelArg(pd.verify, 0, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verify, 1, sizeof(cl_mem), &pd.d_compproducts);
-	sclSetKernelArg(pd.verify, 2, sizeof(cl_mem), &pd.d_smallprimes);
-	sclSetKernelArg(pd.verify, 3, sizeof(uint32_t), &sd.prodcount);
-	sclSetKernelArg(pd.verify, 4, sizeof(uint32_t), &ipsize);
-	sclSetKernelArg(pd.verify, 5, sizeof(uint32_t), &st.nmin);
-	sclSetKernelArg(pd.verify, 6, sizeof(uint32_t), &st.nmax);
-
-	sclSetKernelArg(pd.verifyreduce, 0, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verifyreduce, 1, sizeof(uint32_t), &ver_groups);
-
-	sclSetKernelArg(pd.verifyresult, 0, sizeof(cl_mem), &d_verify);
-	sclSetKernelArg(pd.verifyresult, 1, sizeof(cl_mem), &pd.d_primecount);
-	sclSetKernelArg(pd.verifyresult, 2, sizeof(uint32_t), &red_groups);
-
-	sclEnqueueKernel(hardware, pd.verifyslow);
-	sclEnqueueKernel(hardware, pd.verify);
-	sclEnqueueKernel(hardware, pd.verifyreduce);
-	sclEnqueueKernel(hardware, pd.verifyresult);
-
-	// copy verification flag to host memory, blocking
-	sclRead(hardware, 6*sizeof(uint32_t), pd.d_primecount, h_primecount);
-	// flag set if there is a gpu product/prime table error
-	if(h_primecount[3] == 1){
-		fprintf(stderr,"error: product/prime table verification failed\n");
-		printf("error: product/prime table verification failed\n");
-		exit(EXIT_FAILURE);
-	}
-	fprintf(stderr,"Verified compositorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
-	if(boinc_is_standalone()){
-		printf("Verified compositorial prime (%" PRIu64 " bytes) and product (%" PRIu64 " bytes) tables\n", itertablesize, tablesize);
-	}
-	sclReleaseMemObject(d_verify);
-	sclReleaseMemObject(d_fullprimelist);
-	sclReleaseClSoft(pd.verifyslow);
-	sclReleaseClSoft(pd.verify);
-
-	if(st.factorial && st.compositorial){
-		sclSetKernelArg(pd.setup, 7, sizeof(cl_mem), &pd.d_compproducts);
-	}
-	else{
-		sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_compproducts);
-		sclSetKernelArg(pd.setup, 5, sizeof(uint32_t), &start_compositorial);
-	}
-
-	sclSetKernelArg(pd.iterate, 5, sizeof(cl_mem), &pd.d_smallprimes);
-
-	sd.nlimit = st.nmax;
-
-}
 
 void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
@@ -1351,36 +1089,36 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
         pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware, NULL);
         pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware, NULL);
-        pd.addsmallprimes = sclGetCLSoftware(addsmallprimes_cl,"addsmallprimes",hardware, NULL);
+        pd.addsmallprimes = sclGetCLSoftwareWithCommon(common_cl, addsmallprimes_cl,"addsmallprimes",hardware, NULL);
 	if(st.pmax < 0xFFFFFFFFFF000000){
-	        pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware, NULL);
+	        pd.getsegprimes = sclGetCLSoftwareWithCommon(common_cl, getsegprimes_cl,"getsegprimes",hardware, NULL);
 	}
 	else{
-	       	pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware, "-D CKOVERFLOW=1" );
+	       	pd.getsegprimes = sclGetCLSoftwareWithCommon(common_cl, getsegprimes_cl,"getsegprimes",hardware, "-DCKOVERFLOW=1" );
 	}
 
 	if(st.factorial && st.compositorial){
-		pd.setup = sclGetCLSoftware(setup_cl,"combined_setup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(iterate_cl,"combined_iterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(check_cl,"combined_check",hardware, NULL);
+		pd.setup = sclGetCLSoftwareWithCommon(common_cl, setup_cl,"fc_setup",hardware, "-DCOMP=1");
+		pd.iterate = sclGetCLSoftwareWithCommon(common_cl, iterate_cl,"fc_iterate",hardware, "-DFACT=1 -DCOMP=1");
+		pd.check = sclGetCLSoftwareWithCommon(common_cl, check_cl,"check",hardware, "-DDUAL=1" );
 	}
 	else if(st.factorial){
-		pd.setup = sclGetCLSoftware(setup_cl,"factorial_setup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(iterate_cl,"factorial_iterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(check_cl,"factorial_compositorial_check",hardware, NULL);
+		pd.setup = sclGetCLSoftwareWithCommon(common_cl, setup_cl,"fc_setup",hardware, NULL);
+		pd.iterate = sclGetCLSoftwareWithCommon(common_cl, iterate_cl,"fc_iterate",hardware, "-DFACT=1");
+		pd.check = sclGetCLSoftwareWithCommon(common_cl, check_cl,"check",hardware, "-DFACT=1" );
 	}
 	else if(st.primorial){
-		pd.setup = sclGetCLSoftware(setup_cl,"primorial_setup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(iterate_cl,"primorial_iterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(check_cl,"primorial_check",hardware, NULL);
+		pd.setup = sclGetCLSoftwareWithCommon(common_cl, setup_cl,"primorial_setup",hardware, NULL);
+		pd.iterate = sclGetCLSoftwareWithCommon(common_cl, iterate_cl,"primorial_iterate",hardware, NULL);
+		pd.check = sclGetCLSoftwareWithCommon(common_cl, check_cl,"check",hardware, "-DPRIM=1" );
 	}
 	else if(st.compositorial){
-		pd.setup = sclGetCLSoftware(setup_cl,"compositorial_setup",hardware, NULL);
-		pd.iterate = sclGetCLSoftware(iterate_cl,"compositorial_iterate",hardware, NULL);
-		pd.check = sclGetCLSoftware(check_cl,"factorial_compositorial_check",hardware, NULL);
+		pd.setup = sclGetCLSoftwareWithCommon(common_cl, setup_cl,"fc_setup",hardware, "-DCOMP=1" );
+		pd.iterate = sclGetCLSoftwareWithCommon(common_cl, iterate_cl,"fc_iterate",hardware, "-DCOMP=1");
+		pd.check = sclGetCLSoftwareWithCommon(common_cl, check_cl,"check",hardware, "-DCOMP=1" );
 	}
-	pd.verifyreduce = sclGetCLSoftware(verifyresult_cl,"verifyreduce",hardware, NULL);
-	pd.verifyresult = sclGetCLSoftware(verifyresult_cl,"verifyresult",hardware, NULL);
+	pd.verifyreduce = sclGetCLSoftwareWithCommon(common_cl, verifyresult_cl,"verifyreduce",hardware, NULL);
+	pd.verifyresult = sclGetCLSoftwareWithCommon(common_cl, verifyresult_cl,"verifyresult",hardware, NULL);
 
 	if(pd.verifyreduce.local_size[0] != 256){
 		pd.verifyreduce.local_size[0] = 256;
@@ -1491,11 +1229,35 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		verifylistsize = csize;
 	}
 
-	// array of primes from nmin to nmax+prime gap
+	// array of primes for iterating from nmin to nmax
 	uint32_t * h_iterprime = NULL;
 	size_t itersize = 0;
-	if(st.compositorial){ 
-		h_iterprime = (uint32_t*)primesieve_generate_primes(st.nmin, st.nmax+320, &itersize, UINT32_PRIMES);
+	if(st.compositorial || st.primorial){ 
+		uint32_t n_end = (st.primorial) ? st.nmax-1 : st.nmax+320;	// add prime gap to compositorial array to prevent overflow in kernel
+		h_iterprime = (uint32_t*)primesieve_generate_primes(st.nmin, n_end, &itersize, UINT32_PRIMES);
+		// send partial prime list to gpu
+		uint64_t itertablesize = itersize*sizeof(cl_uint);
+		if( sd.maxmalloc < itertablesize ){
+			fprintf(stderr, "ERROR: prime table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", itertablesize, sd.maxmalloc);
+			printf( "ERROR: prime table size is %" PRIu64 " bytes.  Device supports allocation up to %" PRIu64 " bytes.\n", itertablesize, sd.maxmalloc);
+			exit(EXIT_FAILURE);
+		}
+		pd.d_smallprimes = clCreateBuffer( hardware.context, CL_MEM_READ_ONLY, itertablesize, NULL, &err );
+		if ( err != CL_SUCCESS ) {
+			fprintf(stderr, "ERROR: clCreateBuffer failure: SmallPrimes array\n");
+			printf( "ERROR: clCreateBuffer failure.\n" );
+			exit(EXIT_FAILURE);
+		}
+		sclWriteNB(hardware, itertablesize, pd.d_smallprimes, h_iterprime);
+		sclSetKernelArg(pd.iterate, 5, sizeof(cl_mem), &pd.d_smallprimes);
+		sd.itersize = itersize;
+	}
+
+	if(st.primorial){
+		sd.nlimit = itersize;
+	}
+	else{
+		sd.nlimit = st.nmax;
 	}
 
 	sclSetGlobalSize( pd.getsegprimes, (sd.range/60)+1 );
@@ -1539,10 +1301,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetKernelArg(pd.check, 0, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.check, 1, sizeof(cl_mem), &pd.d_primecount);
 	sclSetKernelArg(pd.check, 2, sizeof(cl_mem), &pd.d_sum);
-	if(st.factorial || st.compositorial){
-		uint32_t lastn = st.nmax-1;
-		sclSetKernelArg(pd.check, 3, sizeof(uint32_t), &lastn);
-	}
+
+	uint32_t lastn = st.nmax-1;
+	sclSetKernelArg(pd.check, 3, sizeof(uint32_t), &lastn);
 
 	time(&boinc_last);
 	time(&ckpt_last);
@@ -1619,29 +1380,27 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		uint32_t nstart = (st.factorial || st. compositorial) ? st.nmin : 0;
 		uint32_t nmax;
 		uint32_t nextprimepos = 0;
+		uint32_t done = 0;
+		if(st.factorial || st.compositorial){
+			sclSetKernelArg(pd.setup, 7, sizeof(uint32_t), &done);
+		}
 
 		// setup power table, then profile setup kernel once at program start.  adjust work size to target kernel runtime.
 		if(first_iteration){
-			if(st.factorial){
-				setupPowerTable(pd, st, sd, hardware, h_primecount);
-			}
-			if(st.primorial){
-				setupPrimeProducts(pd, st, sd, hardware, h_primecount);
-			}
-			if(st.compositorial){
-				setupCompositeProducts(pd, st, sd, hardware, h_primecount, h_iterprime, itersize);
-			}
-			if(st.factorial && st.compositorial){
-				sclSetKernelArg(pd.setup, 8, sizeof(uint32_t), &sd.powcount);
-				sclSetKernelArg(pd.setup, 9, sizeof(uint32_t), &sd.prodcount);
+			setupPowerTable(pd, st, sd, hardware, h_primecount);
+			if(st.primorial || st.compositorial){
+				verifyIterTable(pd, st, sd, hardware, h_primecount);
 			}
 			fprintf(stderr,"Starting Sieve...\n");
 			if(boinc_is_standalone()){
 				printf("Starting Sieve...\n");
 			}
-			sd.scount = (sd.powcount > sd.prodcount) ? sd.powcount : sd.prodcount;
 			smax = sstart + sd.sstep;
 			if(smax > sd.scount)smax = sd.scount;
+			if(st.compositorial){
+				if(smax == sd.scount) done = 1;
+				sclSetKernelArg(pd.setup, 7, sizeof(uint32_t), &done);
+			}
 			sclSetKernelArg(pd.setup, 3, sizeof(uint32_t), &sstart);
 			sclSetKernelArg(pd.setup, 4, sizeof(uint32_t), &smax);
 			kernel_ms = ProfilesclEnqueueKernel(hardware, pd.setup);
@@ -1656,6 +1415,10 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		for(; sstart < sd.scount; sstart += sd.sstep){
 			smax = sstart + sd.sstep;
 			if(smax > sd.scount)smax = sd.scount;
+			if(st.compositorial){
+				if(smax == sd.scount) done = 1;
+				sclSetKernelArg(pd.setup, 7, sizeof(uint32_t), &done);
+			}
 			sclSetKernelArg(pd.setup, 3, sizeof(uint32_t), &sstart);
 			sclSetKernelArg(pd.setup, 4, sizeof(uint32_t), &smax);
 			if(kernelq == 0){
@@ -1751,10 +1514,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	free(h_checksum);
 	free(h_primecount);
 	cleanup(pd, sd, st);
-	if(st.primorial){
-		free(verifylist);
-	}
-	else if(st.compositorial){
+	if(st.primorial || st.compositorial){
 		free(h_iterprime);
 		free(verifylist);
 	}
@@ -1766,8 +1526,7 @@ void reset_data(workStatus & st, searchData & sd){
 	st.primecount = 0;
 	st.factorcount = 0;
 	sd.scount = 0;
-	sd.powcount = 0;
-	sd.prodcount = 0;
+	sd.itersize = 0;
 	st.factorial = false;
 	st.primorial = false;
 	st.compositorial = false;
@@ -1956,7 +1715,7 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 	st.nmin = 101;
 	st.nmax = 1000000;
 	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 34271 && st.primecount == 9571 && st.checksum == 0x000000006FF88EAE ){
+	if( st.factorcount == 34271 && st.primecount == 9571 && st.checksum == 0x000000006FF58AC6 ){
 		printf("test case 10 passed.\n\n");
 		fprintf(stderr,"test case 10 passed.\n");
 		++goodtest;
@@ -2012,7 +1771,7 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 	st.nmin = 96000;
 	st.nmax = 2000000;
 	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 27 && st.primecount == 394403 && st.checksum == 0x00D214CC0EF0ECB4 ){
+	if( st.factorcount == 27 && st.primecount == 394403 && st.checksum == 0x00D2149C43B817D7 ){
 		printf("test case 13 passed.\n\n");
 		fprintf(stderr,"test case 13 passed.\n");
 		++goodtest;
@@ -2031,7 +1790,7 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 	st.nmin = 101;
 	st.nmax = 1000000;
 	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 84077 && st.primecount == 10433 && st.checksum == 0x00000000EFB634E9 ){
+	if( st.factorcount == 84077 && st.primecount == 10433 && st.checksum == 0x00000000EFB24FFD ){
 		printf("test case 14 passed.\n\n");
 		fprintf(stderr,"test case 14 passed.\n");
 		++goodtest;

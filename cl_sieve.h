@@ -19,7 +19,7 @@ typedef struct {
 
 typedef struct {
 	uint64_t maxmalloc;
-	uint32_t computeunits, nstep, sstep, powcount, prodcount, scount, numresults, threadcount, range, psize, numgroups, nlimit;
+	uint32_t computeunits, nstep, sstep, scount, numresults, threadcount, itersize, range, psize, numgroups, nlimit;
 	bool test, compute, write_state_a_next;
 }searchData;
 
@@ -31,7 +31,6 @@ typedef struct {
 	cl_mem d_smallprimes;
 	cl_mem d_powers;
 	cl_mem d_primeproducts;
-	cl_mem d_compproducts;
 	sclSoft check, iterate, clearn, clearresult, setup, getsegprimes, addsmallprimes, verifyslow, verify, verifyreduce, verifyresult;
 }progData;
 

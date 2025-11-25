@@ -10,12 +10,12 @@ date := $(shell date +%Y%m%d)
 
 APP = PFCSieve-linux64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date)
 
-SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/check.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/iterate.cl kernels/setup.cl kernels/verifyslow.cl kernels/verify.cl kernels/verifyresult.cl kernels/common.cl putil.c putil.h verifyprime.cpp verifyprime.h
-KERNEL_HEADERS = kernels/check.h kernels/clearn.h kernels/clearresult.h kernels/iterate.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h kernels/verifyslow.h kernels/verify.h kernels/verifyresult.h kernels/common.h
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/check.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/iterate.cl kernels/setup.cl kernels/verifyslow.cl kernels/verify.cl kernels/verifyresult.cl putil.c putil.h verifyprime.cpp verifyprime.h
+KERNEL_HEADERS = kernels/check.h kernels/clearn.h kernels/clearresult.h kernels/iterate.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h kernels/verifyslow.h kernels/verify.h kernels/verifyresult.h
 OBJ = main.o cl_sieve.o simpleCL.o putil.o verifyprime.o
 
 OCL_INC = -I /usr/local/cuda/include/CL/
-OCL_LIB = -L . -L /usr/lib/x86_64-linux-gnu -lOpenCL
+OCL_LIB = -L . -L /usr/local/cuda-10.1/targets/x86_64-linux/lib -lOpenCL
 
 BOINC_DIR = /home/bryan/boinc
 BOINC_INC = -I$(BOINC_DIR)/lib -I$(BOINC_DIR)/api -I$(BOINC_DIR)
@@ -27,7 +27,7 @@ LDFLAGS = $(CFLAGS) -static-libgcc -static-libstdc++ -fopenmp
 all : clean $(APP)
 
 $(APP) : $(OBJ)
-	$(LD) $(LDFLAGS) $^ $(OCL_LIB) $(BOINC_LIB) -o $@ /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.a -ldl libprimesieve.a
+	$(LD) $(LDFLAGS) $^ $(OCL_LIB) $(BOINC_LIB) -o $@ /usr/lib/gcc/x86_64-linux-gnu/9/libgomp.a -ldl libprimesieve.a
 
 main.o : $(SRC)
 	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -fopenmp -c -o $@ main.cpp
