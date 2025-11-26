@@ -1,8 +1,9 @@
 /*
 
-	verify.cl - Bryan Little 4/2025, montgomery arithmetic by Yves Gallot
+	verify.cl - Bryan Little 11/2025, montgomery arithmetic by Yves Gallot
 	
-	verify power table using table
+	factorial function calculates the starting N factorial quickly using prime powers
+	primorial function calculates the primorial of the ending N using the initial primorial table and the iteration table
 
 */
 

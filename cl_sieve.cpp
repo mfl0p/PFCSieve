@@ -1051,9 +1051,9 @@ void verifyIterTable(progData & pd, workStatus & st, searchData & sd, sclHard ha
 		printf("error: product/iteration table verification failed\n");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr,"Verified prime table (%" PRIu64 " bytes)\n", (uint64_t)sd.itersize*sizeof(cl_uint));
+	fprintf(stderr,"Verified iteration table (%" PRIu64 " bytes)\n", (uint64_t)sd.itersize*sizeof(cl_uint));
 	if(boinc_is_standalone()){
-		printf("Verified prime table (%" PRIu64 " bytes)\n", (uint64_t)sd.itersize*sizeof(cl_uint));
+		printf("Verified iteration table (%" PRIu64 " bytes)\n", (uint64_t)sd.itersize*sizeof(cl_uint));
 	}
 	sclReleaseMemObject(d_verify);
 	sclReleaseMemObject(d_fullprimelist);
@@ -1377,7 +1377,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
 		uint32_t sstart = 0;
 		uint32_t smax;
-		uint32_t nstart = (st.factorial || st. compositorial) ? st.nmin : 0;
+		uint32_t nstart = (st.factorial || st.compositorial) ? st.nmin : 0;
 		uint32_t nmax;
 		uint32_t nextprimepos = 0;
 		uint32_t done = 0;

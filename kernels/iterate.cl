@@ -70,8 +70,8 @@ __kernel void fc_iterate(	__global ulong8 * g_prime,
 #ifdef COMP
 	uint ppos = primeposition;
 	uint nextprime = g_smallprimes[ppos];
-#endif
 	if(!prime.s0) return;
+#endif
 
 	for(uint currN = startN; currN < endN; ++currN){
 		prime.s7 = add(prime.s7, prime.s3, prime.s0);

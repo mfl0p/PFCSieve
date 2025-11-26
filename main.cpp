@@ -1,6 +1,6 @@
 /*
 	PFCSieve
-	Bryan Little, April 2025
+	Bryan Little, Nov 2025
 	
 	with contributions by Yves Gallot, Mark Rodenkirch, and Kim Walisch
 

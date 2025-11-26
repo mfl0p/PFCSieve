@@ -1,8 +1,9 @@
 /* 
 
-	verifyslow.cl - Bryan Little 4/2025, montgomery arithmetic by Yves Gallot
+	verifyslow.cl - Bryan Little 11/2025, montgomery arithmetic by Yves Gallot
 	
-	verify power/product/prime tables using slow iterative algorithm
+	factorial function calculates the starting N factorial using slow iterative algorithm
+	primorial function calculates the primorial of the ending N using a single list of primes
 
 */
 

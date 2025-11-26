@@ -5,13 +5,13 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 1
-VERSION_MINOR := 4
+VERSION_MINOR := 5
 date := $(shell powershell.exe get-date -format FileDate)
 
 APP = PFCSieve-win64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date).exe
 
-SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/check.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/iterate.cl kernels/setup.cl kernels/verifyslow.cl kernels/verify.cl kernels/verifyresult.cl putil.c putil.h verifyprime.cpp verifyprime.h
-KERNEL_HEADERS = kernels/check.h kernels/clearn.h kernels/clearresult.h kernels/iterate.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h kernels/verifyslow.h kernels/verify.h kernels/verifyresult.h
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/check.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/iterate.cl kernels/setup.cl kernels/verifyslow.cl kernels/verify.cl kernels/verifyresult.cl kernels/common.cl putil.c putil.h verifyprime.cpp verifyprime.h
+KERNEL_HEADERS = kernels/check.h kernels/clearn.h kernels/clearresult.h kernels/iterate.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h kernels/verifyslow.h kernels/verify.h kernels/verifyresult.h kernels/common.h
 OBJ = main.o cl_sieve.o simpleCL.o putil.o verifyprime.o
 
 LIBS = OpenCL.dll libprimesievewin.a

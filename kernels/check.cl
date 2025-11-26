@@ -23,7 +23,10 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(	__global 
 		// .s0=p, .s1=q, .s2=r2, .s3=one, .s4=residue of final compositorial, .s5=nmo, .s6=residue of final factorial, .s7= montgomery form of last n
 		const ulong8 prime = g_prime[gid];
 
+#if defined(COMP) || defined(DUAL)
 		if(prime.s0){
+#endif
+
 #if defined(FACT)
 			sum[lid] = prime.s6 + prime.s7;
 #elif defined(PRIM)
@@ -49,7 +52,10 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(	__global 
 				atomic_or(&g_primecount[5], 1);
 			}
 #endif
+
+#if defined(COMP) || defined(DUAL)
 		}
+#endif
 	}
 
 	barrier(CLK_LOCAL_MEM_FENCE);
